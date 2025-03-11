@@ -1,9 +1,6 @@
-name: Build and Deploy
+name: Java and docker build
 
-on:
-  push:
-    branches:
-      - main
+on: workflow_dispatch
 
 jobs:
   build:

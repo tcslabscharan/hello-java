@@ -26,7 +26,36 @@ jobs:
       env:
         ART_USER: ${{ secrets.ART_USER }}
         ART_PASS: ${{ secrets.ART_PASS }}
-      run: mvn clean package deploy -DskipTests -s .mvn/settings.xml
+      run: mvn clean test package deploy -DskipTests -s .mvn/settings.xml
+    - name: Generate Test Report Summary
+      run: |
+        mkdir -p reports
+        # Convert JUnit XML reports to Markdown format
+        for report in target/surefire-reports/*.xml; do
+          python3 -c "
+import xml.etree.ElementTree as ET
+import sys
+
+def parse_junit_xml(file):
+    tree = ET.parse(file)
+    root = tree.getroot()
+    summary = []
+    for testcase in root.findall('.//testcase'):
+        classname = testcase.attrib.get('classname', 'Unknown')
+        name = testcase.attrib.get('name', 'Unknown')
+        failure = testcase.find('failure')
+        if failure is not None:
+            summary.append(f'❌ **{classname}.{name}**: Failed')
+        else:
+            summary.append(f'✅ **{classname}.{name}**: Passed')
+    return '\n'.join(summary)
+
+print(parse_junit_xml('$report'))
+" >> reports/test-summary.md
+        done
+        # Print the summary to the GitHub summary
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        cat reports/test-summary.md >> $GITHUB_STEP_SUMMARY
 
     - name: Upload JAR artifact
       uses: actions/upload-artifact@v4

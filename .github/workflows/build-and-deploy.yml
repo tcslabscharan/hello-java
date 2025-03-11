@@ -24,6 +24,7 @@ jobs:
         maven-version: 3.9.9
     - name: Configure Maven settings
       run: |
+        mkdir -p $HOME/.m2
         echo "${{ secrets.SETTINGSXML }}" > $HOME/.m2/settings.xml
     - name: Build with Maven
       run: mvn clean package deploy -DskipTests --settings $HOME/.m2/settings.xml

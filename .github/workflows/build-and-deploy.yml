@@ -30,9 +30,10 @@ jobs:
     - name: Generate Test Report Summary
       run: |
         mkdir -p reports
+        > reports/test-summary.md
         # Convert JUnit XML reports to Markdown format
         for report in target/surefire-reports/*.xml; do
-          python3 -c "
+          python3 - <<EOF >> reports/test-summary.md
 import xml.etree.ElementTree as ET
 import sys
 
@@ -45,13 +46,13 @@ def parse_junit_xml(file):
         name = testcase.attrib.get('name', 'Unknown')
         failure = testcase.find('failure')
         if failure is not None:
-            summary.append(f'❌ **{classname}.{name}**: Failed')
+            summary.append(f"❌ **{classname}.{name}**: Failed")
         else:
-            summary.append(f'✅ **{classname}.{name}**: Passed')
+            summary.append(f"✅ **{classname}.{name}**: Passed")
     return '\n'.join(summary)
 
 print(parse_junit_xml('$report'))
-" >> reports/test-summary.md
+EOF
         done
         # Print the summary to the GitHub summary
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
@@ -77,6 +78,7 @@ print(parse_junit_xml('$report'))
       uses: actions/download-artifact@v4
       with:
         name: hello-world-jar
+        path: ./target/
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 

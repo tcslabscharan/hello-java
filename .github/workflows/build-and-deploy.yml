@@ -33,9 +33,10 @@ jobs:
         > reports/test-summary.md
         # Convert JUnit XML reports to Markdown format
         for report in target/surefire-reports/*.xml; do
-          python3 - <<EOF >> reports/test-summary.md
+          python3 <<EOT >> reports/test-summary.md
 import xml.etree.ElementTree as ET
 import sys
+import os
 
 def parse_junit_xml(file):
     tree = ET.parse(file)
@@ -46,13 +47,13 @@ def parse_junit_xml(file):
         name = testcase.attrib.get('name', 'Unknown')
         failure = testcase.find('failure')
         if failure is not None:
-            summary.append(f"❌ **{classname}.{name}**: Failed")
+            summary.append("❌ **{}**.{}: Failed".format(classname, name))
         else:
-            summary.append(f"✅ **{classname}.{name}**: Passed")
+            summary.append("✅ **{}**.{}: Passed".format(classname, name))
     return '\n'.join(summary)
 
-print(parse_junit_xml('$report'))
-EOF
+print(parse_junit_xml('${report}'))
+EOT
         done
         # Print the summary to the GitHub summary
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY

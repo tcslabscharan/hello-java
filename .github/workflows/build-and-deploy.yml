@@ -27,44 +27,27 @@ jobs:
         ART_USER: ${{ secrets.ART_USER }}
         ART_PASS: ${{ secrets.ART_PASS }}
       run: mvn clean test package deploy -DskipTests -s .mvn/settings.xml
+      
     - name: Generate Test Report Summary
       run: |
         mkdir -p reports
-        > reports/test-summary.md
-        # Create a Python script to parse XML
-        cat > parse_xml.py << 'EOF'
-import xml.etree.ElementTree as ET
-import sys
-
-def parse_junit_xml(file):
-    tree = ET.parse(file)
-    root = tree.getroot()
-    summary = []
-    for testcase in root.findall('.//testcase'):
-        classname = testcase.attrib.get('classname', 'Unknown')
-        name = testcase.attrib.get('name', 'Unknown')
-        failure = testcase.find('failure')
-        if failure is not None:
-            summary.append("❌ **{}**.{}: Failed".format(classname, name))
-        else:
-            summary.append("✅ **{}**.{}: Passed".format(classname, name))
-    return '\n'.join(summary)
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        print(parse_junit_xml(sys.argv[1]))
-    else:
-        print("No file specified")
-EOF
-
-        # Run the script for each XML report
-        for report in target/surefire-reports/*.xml; do
-          python3 parse_xml.py "$report" >> reports/test-summary.md
-        done
-        
-        # Print the summary to the GitHub summary
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-        cat reports/test-summary.md >> $GITHUB_STEP_SUMMARY
+        
+        # Process test reports
+        for report in target/surefire-reports/*.xml; do
+          echo "Processing test file: $report"
+          
+          # Extract test results directly with grep and sed
+          passed_tests=$(grep -c "<testcase " "$report" || echo "0")
+          failed_tests=$(grep -c "<failure " "$report" || echo "0")
+          
+          # Get test class name
+          class_name=$(grep -o 'classname="[^"]*"' "$report" | head -1 | sed 's/classname="//;s/"$//')
+          
+          # Summarize results
+          echo "- $class_name: ✅ $passed_tests passed, ❌ $failed_tests failed" >> $GITHUB_STEP_SUMMARY
+          echo "- $class_name: ✅ $passed_tests passed, ❌ $failed_tests failed" >> reports/test-summary.md
+        done
 
     - name: Upload JAR artifact
       uses: actions/upload-artifact@v4
@@ -87,6 +70,7 @@ EOF
       with:
         name: hello-world-jar
         path: ./target/
+        
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 

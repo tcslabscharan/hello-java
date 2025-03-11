@@ -28,105 +28,111 @@ jobs:
         ART_USER: ${{ secrets.ART_USER }}
         ART_PASS: ${{ secrets.ART_PASS }}
       run: mvn clean test package deploy -s .mvn/settings.xml
+      id: maven-build
       
     - name: Generate Test Report Summary
       run: |
         mkdir -p reports
-        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        
+        # Create summary file
+        echo "## Test Results" > $GITHUB_STEP_SUMMARY
+        
+        # Extract Maven test results directly from Maven output
+        echo "### Maven Test Summary" >> $GITHUB_STEP_SUMMARY
+        
+        # Extract the Maven test summary line from the previous step
+        mvn_output=$(cat target/surefire-reports/TEST-*.xml | grep -o 'tests="[0-9]*" failures="[0-9]*" errors="[0-9]*" skipped="[0-9]*"' | head -1)
+        tests=$(echo "$mvn_output" | grep -o 'tests="[0-9]*"' | cut -d'"' -f2)
+        failures=$(echo "$mvn_output" | grep -o 'failures="[0-9]*"' | cut -d'"' -f2)
+        errors=$(echo "$mvn_output" | grep -o 'errors="[0-9]*"' | cut -d'"' -f2)
+        skipped=$(echo "$mvn_output" | grep -o 'skipped="[0-9]*"' | cut -d'"' -f2)
+        passed=$((tests - failures - errors - skipped))
+        
+        echo "- **Tests run:** $tests" >> $GITHUB_STEP_SUMMARY
+        echo "- **Passed:** $passed" >> $GITHUB_STEP_SUMMARY
+        echo "- **Failed:** $failures" >> $GITHUB_STEP_SUMMARY
+        echo "- **Errors:** $errors" >> $GITHUB_STEP_SUMMARY
+        echo "- **Skipped:** $skipped" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         
         # Check if test reports exist
         if [ -d "target/surefire-reports" ]; then
-          echo "Found surefire reports directory" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Classes" >> $GITHUB_STEP_SUMMARY
           
-          # Process test summary from Maven output
-          echo "### Maven Test Summary" >> $GITHUB_STEP_SUMMARY
-          
-          # Create a summary table header
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Test Class | Tests | Passed | Failed | Errors | Skipped |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|-------|--------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
-          
-          # Initialize counters for overall summary
-          total_tests=0
-          total_passed=0
-          total_failed=0
-          total_errors=0
-          total_skipped=0
+          echo "| --- | --- | --- | --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
           
           # Process individual test reports
           for report in target/surefire-reports/*.xml; do
-            # Get test class name from filename
-            base_name=$(basename "$report" .xml)
-            class_name=${base_name}
-            
-            # Count test cases and failures
-            test_count=$(grep -c "<testcase " "$report" || echo "0")
-            failure_count=$(grep -c "<failure " "$report" || echo "0")
-            error_count=$(grep -c "<error " "$report" || echo "0")
-            skipped_count=$(grep -c "<skipped" "$report" || echo "0")
-            
-            # Calculate passed tests
-            passed_tests=$((test_count - failure_count - error_count - skipped_count))
-            
-            # Add to totals
-            total_tests=$((total_tests + test_count))
-            total_passed=$((total_passed + passed_tests))
-            total_failed=$((total_failed + failure_count))
-            total_errors=$((total_errors + error_count))
-            total_skipped=$((total_skipped + skipped_count))
-            
-            # Add row to summary table
-            echo "| $class_name | $test_count | $passed_tests | $failure_count | $error_count | $skipped_count |" >> $GITHUB_STEP_SUMMARY
+            if [ -f "$report" ]; then
+              # Get test class name from XML
+              class_name=$(grep -o 'classname="[^"]*"' "$report" | head -1 | sed 's/classname="//;s/"//')
+              
+              # If no classname in XML, get from filename
+              if [ -z "$class_name" ]; then
+                base_name=$(basename "$report" .xml)
+                class_name=${base_name#TEST-}
+              fi
+              
+              # Get test counts directly from XML summary
+              report_summary=$(cat "$report" | grep -o 'tests="[0-9]*" failures="[0-9]*" errors="[0-9]*" skipped="[0-9]*"' | head -1)
+              test_count=$(echo "$report_summary" | grep -o 'tests="[0-9]*"' | cut -d'"' -f2)
+              failure_count=$(echo "$report_summary" | grep -o 'failures="[0-9]*"' | cut -d'"' -f2)
+              error_count=$(echo "$report_summary" | grep -o 'errors="[0-9]*"' | cut -d'"' -f2)
+              skipped_count=$(echo "$report_summary" | grep -o 'skipped="[0-9]*"' | cut -d'"' -f2)
+              
+              # Calculate passed tests
+              passed_tests=$((test_count - failure_count - error_count - skipped_count))
+              
+              # Add row to summary table (using proper table syntax)
+              echo "| $class_name | $test_count | $passed_tests | $failure_count | $error_count | $skipped_count |" >> $GITHUB_STEP_SUMMARY
+            fi
           done
-          
-          # Add totals row
-          echo "| **TOTAL** | **$total_tests** | **$total_passed** | **$total_failed** | **$total_errors** | **$total_skipped** |" >> $GITHUB_STEP_SUMMARY
-          
-          # Add visual summary with emoji
-          echo "### Summary" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **$total_passed passed** tests" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "$total_failed" -gt 0 ]; then
-            echo "❌ **$total_failed failed** tests" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "$total_errors" -gt 0 ]; then
-            echo "⚠️ **$total_errors error** tests" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "$total_skipped" -gt 0 ]; then
-            echo "⏭️ **$total_skipped skipped** tests" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
           
           # Test Result Details section (collapsible)
-          echo "<details><summary>Test Result Details</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Test Method Details</summary>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           for report in target/surefire-reports/*.xml; do
-            class_name=$(basename "$report" .xml)
-            echo "#### $class_name" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Test Method | Status | Time |" >> $GITHUB_STEP_SUMMARY
-            echo "|-------------|--------|------|" >> $GITHUB_STEP_SUMMARY
-            
-            # Extract test methods and status
-            grep "<testcase " "$report" | while read -r line; do
-              test_name=$(echo "$line" | sed -n 's/.*name="\([^"]*\)".*/\1/p')
-              test_time=$(echo "$line" | sed -n 's/.*time="\([^"]*\)".*/\1/p')
-              
-              # Check if test has failure
-              if grep -q "<failure.*>.*</failure>" <<< "$line"; then
-                status="❌ Failed"
-              elif grep -q "<error.*>.*</error>" <<< "$line"; then
-                status="⚠️ Error"
-              elif grep -q "<skipped.*>.*</skipped>" <<< "$line"; then
-                status="⏭️ Skipped"
-              else
-                status="✅ Passed"
+            if [ -f "$report" ]; then
+              # Get class name
+              class_name=$(grep -o 'classname="[^"]*"' "$report" | head -1 | sed 's/classname="//;s/"//')
+              if [ -z "$class_name" ]; then
+                base_name=$(basename "$report" .xml)
+                class_name=${base_name#TEST-}
               fi
               
-              echo "| $test_name | $status | ${test_time}s |" >> $GITHUB_STEP_SUMMARY
-            done
-            echo "" >> $GITHUB_STEP_SUMMARY
+              echo "#### $class_name" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Test Method | Result | Time (sec) |" >> $GITHUB_STEP_SUMMARY
+              echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+              
+              # Extract testcase elements and process them
+              grep -A 3 "<testcase " "$report" | while read -r line; do
+                if [[ $line == *"<testcase "* ]]; then
+                  test_name=$(echo "$line" | sed -n 's/.*name="\([^"]*\)".*/\1/p')
+                  test_time=$(echo "$line" | sed -n 's/.*time="\([^"]*\)".*/\1/p')
+                  
+                  # Default to passed
+                  status="✅ Passed"
+                  
+                  # Check next lines for failure/error
+                  read -r next_line
+                  if [[ $next_line == *"<failure"* ]]; then
+                    status="❌ Failed"
+                  elif [[ $next_line == *"<error"* ]]; then
+                    status="⚠️ Error"
+                  elif [[ $next_line == *"<skipped"* ]]; then
+                    status="⏭️ Skipped"
+                  fi
+                  
+                  echo "| $test_name | $status | $test_time |" >> $GITHUB_STEP_SUMMARY
+                fi
+              done
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
           done
           
           echo "</details>" >> $GITHUB_STEP_SUMMARY

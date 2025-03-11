@@ -26,28 +26,52 @@ jobs:
       env:
         ART_USER: ${{ secrets.ART_USER }}
         ART_PASS: ${{ secrets.ART_PASS }}
-      run: mvn clean test package deploy -DskipTests -s .mvn/settings.xml
+      run: mvn clean test package deploy -s .mvn/settings.xml
       
     - name: Generate Test Report Summary
       run: |
         mkdir -p reports
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
         
-        # Process test reports
-        for report in target/surefire-reports/*.xml; do
-          echo "Processing test file: $report"
+        # Check if test reports exist
+        if [ -d "target/surefire-reports" ]; then
+          echo "Found surefire reports directory" >> $GITHUB_STEP_SUMMARY
           
-          # Extract test results directly with grep and sed
-          passed_tests=$(grep -c "<testcase " "$report" || echo "0")
-          failed_tests=$(grep -c "<failure " "$report" || echo "0")
+          # Process test summary from Maven output
+          echo "### Maven Test Summary" >> $GITHUB_STEP_SUMMARY
+          # Extract the test summary line from the Maven output
+          mvn test -q | grep "Tests run:" | tee -a $GITHUB_STEP_SUMMARY
           
-          # Get test class name
-          class_name=$(grep -o 'classname="[^"]*"' "$report" | head -1 | sed 's/classname="//;s/"$//')
-          
-          # Summarize results
-          echo "- $class_name: ✅ $passed_tests passed, ❌ $failed_tests failed" >> $GITHUB_STEP_SUMMARY
-          echo "- $class_name: ✅ $passed_tests passed, ❌ $failed_tests failed" >> reports/test-summary.md
-        done
+          # Process individual test reports
+          echo "### Individual Test Results" >> $GITHUB_STEP_SUMMARY
+          for report in target/surefire-reports/*.xml; do
+            echo "Processing test file: $report" 
+            
+            # Get test class name from filename instead of parsing XML
+            base_name=$(basename "$report" .xml)
+            class_name=${base_name%Test}
+            
+            # Count test cases and failures more robustly
+            test_count=$(grep -c "<testcase " "$report" || echo "0")
+            failure_count=$(grep -c "<failure " "$report" || echo "0")
+            error_count=$(grep -c "<error " "$report" || echo "0")
+            skipped_count=$(grep -c "<skipped" "$report" || echo "0")
+            
+            # Calculate passed tests
+            passed_tests=$((test_count - failure_count - error_count - skipped_count))
+            
+            # Summarize results
+            echo "- $class_name: ✅ $passed_tests passed, ❌ $failure_count failed, ⚠️ $error_count errors, ⏭️ $skipped_count skipped" >> $GITHUB_STEP_SUMMARY
+          done
+        else
+          echo "⚠️ No test reports found in target/surefire-reports" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Display test coverage from JaCoCo if available
+        if [ -f "target/site/jacoco/index.html" ]; then
+          echo "### Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "JaCoCo coverage report generated. Check artifacts for details." >> $GITHUB_STEP_SUMMARY
+        fi
 
     - name: Upload JAR artifact
       uses: actions/upload-artifact@v4
@@ -55,9 +79,19 @@ jobs:
         name: hello-world-jar
         path: target/hello-world-1.0.0-SNAPSHOT.jar
 
+    - name: Upload Test Reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-reports
+        path: |
+          target/surefire-reports/
+          target/site/jacoco/
+        if-no-files-found: ignore
+
   build-and-push-docker:
     runs-on: myvm
     needs: build
+    if: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip docker]') }}
     env:
       ART_URL: reg.mevijay.dev
       REPO: demo

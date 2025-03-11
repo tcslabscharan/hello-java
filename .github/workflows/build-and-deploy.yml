@@ -26,7 +26,7 @@ jobs:
       run: |
         echo "${{ secrets.SETTINGSXML }}" > $HOME/.m2/settings.xml
     - name: Build with Maven
-      run: mvn clean package -DskipTests --settings $HOME/.m2/settings.xml
+      run: mvn clean package deploy -DskipTests --settings $HOME/.m2/settings.xml
 
     - name: Upload JAR artifact
       uses: actions/upload-artifact@v4

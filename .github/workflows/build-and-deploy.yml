@@ -31,12 +31,10 @@ jobs:
       run: |
         mkdir -p reports
         > reports/test-summary.md
-        # Convert JUnit XML reports to Markdown format
-        for report in target/surefire-reports/*.xml; do
-          python3 <<EOT >> reports/test-summary.md
+        # Create a Python script to parse XML
+        cat > parse_xml.py << 'EOF'
 import xml.etree.ElementTree as ET
 import sys
-import os
 
 def parse_junit_xml(file):
     tree = ET.parse(file)
@@ -52,9 +50,18 @@ def parse_junit_xml(file):
             summary.append("✅ **{}**.{}: Passed".format(classname, name))
     return '\n'.join(summary)
 
-print(parse_junit_xml('${report}'))
-EOT
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        print(parse_junit_xml(sys.argv[1]))
+    else:
+        print("No file specified")
+EOF
+
+        # Run the script for each XML report
+        for report in target/surefire-reports/*.xml; do
+          python3 parse_xml.py "$report" >> reports/test-summary.md
         done
+        
         # Print the summary to the GitHub summary
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
         cat reports/test-summary.md >> $GITHUB_STEP_SUMMARY

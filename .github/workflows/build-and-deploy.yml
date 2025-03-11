@@ -18,6 +18,7 @@ jobs:
       with:
         distribution: 'zulu'
         java-version: '17'
+        cache: 'maven'
     - name: Set up Maven
       uses: stCarolas/setup-maven@v5
       with:
@@ -39,19 +40,25 @@ jobs:
           
           # Process test summary from Maven output
           echo "### Maven Test Summary" >> $GITHUB_STEP_SUMMARY
-          # Extract the test summary line from the Maven output
-          mvn test -q | grep "Tests run:" | tee -a $GITHUB_STEP_SUMMARY
+          
+          # Create a summary table header
+          echo "| Test Class | Tests | Passed | Failed | Errors | Skipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|-------|--------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Initialize counters for overall summary
+          total_tests=0
+          total_passed=0
+          total_failed=0
+          total_errors=0
+          total_skipped=0
           
           # Process individual test reports
-          echo "### Individual Test Results" >> $GITHUB_STEP_SUMMARY
           for report in target/surefire-reports/*.xml; do
-            echo "Processing test file: $report" 
-            
-            # Get test class name from filename instead of parsing XML
+            # Get test class name from filename
             base_name=$(basename "$report" .xml)
-            class_name=${base_name%Test}
+            class_name=${base_name}
             
-            # Count test cases and failures more robustly
+            # Count test cases and failures
             test_count=$(grep -c "<testcase " "$report" || echo "0")
             failure_count=$(grep -c "<failure " "$report" || echo "0")
             error_count=$(grep -c "<error " "$report" || echo "0")
@@ -60,9 +67,70 @@ jobs:
             # Calculate passed tests
             passed_tests=$((test_count - failure_count - error_count - skipped_count))
             
-            # Summarize results
-            echo "- $class_name: ✅ $passed_tests passed, ❌ $failure_count failed, ⚠️ $error_count errors, ⏭️ $skipped_count skipped" >> $GITHUB_STEP_SUMMARY
+            # Add to totals
+            total_tests=$((total_tests + test_count))
+            total_passed=$((total_passed + passed_tests))
+            total_failed=$((total_failed + failure_count))
+            total_errors=$((total_errors + error_count))
+            total_skipped=$((total_skipped + skipped_count))
+            
+            # Add row to summary table
+            echo "| $class_name | $test_count | $passed_tests | $failure_count | $error_count | $skipped_count |" >> $GITHUB_STEP_SUMMARY
           done
+          
+          # Add totals row
+          echo "| **TOTAL** | **$total_tests** | **$total_passed** | **$total_failed** | **$total_errors** | **$total_skipped** |" >> $GITHUB_STEP_SUMMARY
+          
+          # Add visual summary with emoji
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **$total_passed passed** tests" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$total_failed" -gt 0 ]; then
+            echo "❌ **$total_failed failed** tests" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "$total_errors" -gt 0 ]; then
+            echo "⚠️ **$total_errors error** tests" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "$total_skipped" -gt 0 ]; then
+            echo "⏭️ **$total_skipped skipped** tests" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Test Result Details section (collapsible)
+          echo "<details><summary>Test Result Details</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for report in target/surefire-reports/*.xml; do
+            class_name=$(basename "$report" .xml)
+            echo "#### $class_name" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Test Method | Status | Time |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------------|--------|------|" >> $GITHUB_STEP_SUMMARY
+            
+            # Extract test methods and status
+            grep "<testcase " "$report" | while read -r line; do
+              test_name=$(echo "$line" | sed -n 's/.*name="\([^"]*\)".*/\1/p')
+              test_time=$(echo "$line" | sed -n 's/.*time="\([^"]*\)".*/\1/p')
+              
+              # Check if test has failure
+              if grep -q "<failure.*>.*</failure>" <<< "$line"; then
+                status="❌ Failed"
+              elif grep -q "<error.*>.*</error>" <<< "$line"; then
+                status="⚠️ Error"
+              elif grep -q "<skipped.*>.*</skipped>" <<< "$line"; then
+                status="⏭️ Skipped"
+              else
+                status="✅ Passed"
+              fi
+              
+              echo "| $test_name | $status | ${test_time}s |" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+          
         else
           echo "⚠️ No test reports found in target/surefire-reports" >> $GITHUB_STEP_SUMMARY
         fi
@@ -70,7 +138,42 @@ jobs:
         # Display test coverage from JaCoCo if available
         if [ -f "target/site/jacoco/index.html" ]; then
           echo "### Test Coverage Report" >> $GITHUB_STEP_SUMMARY
-          echo "JaCoCo coverage report generated. Check artifacts for details." >> $GITHUB_STEP_SUMMARY
+          
+          # Try to extract coverage data from JaCoCo reports
+          if [ -f "target/site/jacoco/jacoco.csv" ]; then
+            echo "| Package | Class | Instruction Coverage | Branch Coverage | Line Coverage |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|---------------------|----------------|--------------|" >> $GITHUB_STEP_SUMMARY
+            
+            # Skip header line and process each line of the CSV
+            tail -n +2 "target/site/jacoco/jacoco.csv" | while IFS=, read -r package class instr_missed instr_covered branch_missed branch_covered line_missed line_covered; do
+              # Calculate coverage percentages
+              instr_total=$((instr_missed + instr_covered))
+              branch_total=$((branch_missed + branch_covered))
+              line_total=$((line_missed + line_covered))
+              
+              if [ "$instr_total" -gt 0 ]; then
+                instr_pct=$(( 100 * instr_covered / instr_total ))
+              else
+                instr_pct="N/A"
+              fi
+              
+              if [ "$branch_total" -gt 0 ]; then
+                branch_pct=$(( 100 * branch_covered / branch_total ))
+              else
+                branch_pct="N/A"
+              fi
+              
+              if [ "$line_total" -gt 0 ]; then
+                line_pct=$(( 100 * line_covered / line_total ))
+              else
+                line_pct="N/A"
+              fi
+              
+              echo "| $package | $class | $instr_pct% | $branch_pct% | $line_pct% |" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "JaCoCo coverage report generated. Check artifacts for details." >> $GITHUB_STEP_SUMMARY
+          fi
         fi
 
     - name: Upload JAR artifact

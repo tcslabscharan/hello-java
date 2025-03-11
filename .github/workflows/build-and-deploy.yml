@@ -145,37 +145,56 @@ jobs:
         if [ -f "target/site/jacoco/index.html" ]; then
           echo "### Test Coverage Report" >> $GITHUB_STEP_SUMMARY
           
-          # Try to extract coverage data from JaCoCo reports
-          if [ -f "target/site/jacoco/jacoco.csv" ]; then
-            echo "| Package | Class | Instruction Coverage | Branch Coverage | Line Coverage |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|-------|---------------------|----------------|--------------|" >> $GITHUB_STEP_SUMMARY
+          # Extract overall coverage from jacoco.xml if available
+          if [ -f "target/site/jacoco/jacoco.xml" ]; then
+            echo "#### Overall Coverage" >> $GITHUB_STEP_SUMMARY
             
-            # Skip header line and process each line of the CSV
-            tail -n +2 "target/site/jacoco/jacoco.csv" | while IFS=, read -r package class instr_missed instr_covered branch_missed branch_covered line_missed line_covered; do
-              # Calculate coverage percentages
-              instr_total=$((instr_missed + instr_covered))
-              branch_total=$((branch_missed + branch_covered))
-              line_total=$((line_missed + line_covered))
-              
-              if [ "$instr_total" -gt 0 ]; then
-                instr_pct=$(( 100 * instr_covered / instr_total ))
-              else
-                instr_pct="N/A"
-              fi
-              
-              if [ "$branch_total" -gt 0 ]; then
-                branch_pct=$(( 100 * branch_covered / branch_total ))
-              else
-                branch_pct="N/A"
-              fi
-              
+            # Extract coverage metrics
+            line_covered=$(grep -o 'type="LINE" covered="[0-9]*"' "target/site/jacoco/jacoco.xml" | head -1 | grep -o 'covered="[0-9]*"' | cut -d'"' -f2)
+            line_missed=$(grep -o 'type="LINE" missed="[0-9]*"' "target/site/jacoco/jacoco.xml" | head -1 | grep -o 'missed="[0-9]*"' | cut -d'"' -f2)
+            branch_covered=$(grep -o 'type="BRANCH" covered="[0-9]*"' "target/site/jacoco/jacoco.xml" | head -1 | grep -o 'covered="[0-9]*"' | cut -d'"' -f2)
+            branch_missed=$(grep -o 'type="BRANCH" missed="[0-9]*"' "target/site/jacoco/jacoco.xml" | head -1 | grep -o 'missed="[0-9]*"' | cut -d'"' -f2)
+            
+            # Calculate percentages
+            if [ -n "$line_covered" ] && [ -n "$line_missed" ]; then
+              line_total=$((line_covered + line_missed))
               if [ "$line_total" -gt 0 ]; then
                 line_pct=$(( 100 * line_covered / line_total ))
-              else
-                line_pct="N/A"
+                echo "- **Line Coverage**: $line_pct% ($line_covered of $line_total lines)" >> $GITHUB_STEP_SUMMARY
               fi
+            fi
+            
+            if [ -n "$branch_covered" ] && [ -n "$branch_missed" ]; then
+              branch_total=$((branch_covered + branch_missed))
+              if [ "$branch_total" -gt 0 ]; then
+                branch_pct=$(( 100 * branch_covered / branch_total ))
+                echo "- **Branch Coverage**: $branch_pct% ($branch_covered of $branch_total branches)" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "#### Coverage Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Class | Line Coverage | Branch Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to find and process coverage data files
+          if [ -d "target/site/jacoco" ]; then
+            find "target/site/jacoco" -name "*.html" | grep -v "index.html" | while read -r coverage_file; do
+              class_name=$(basename "$coverage_file" .html)
+              package_path=$(dirname "$coverage_file" | sed "s|target/site/jacoco/||")
+              package_name=${package_path//\//.}
               
-              echo "| $package | $class | $instr_pct% | $branch_pct% | $line_pct% |" >> $GITHUB_STEP_SUMMARY
+              # Extract coverage percentages from HTML
+              line_coverage=$(grep -o 'Total[^%]*%' "$coverage_file" | head -1 | grep -o '[0-9.]*%')
+              branch_coverage=$(grep -o 'Total[^%]*%' "$coverage_file" | tail -1 | grep -o '[0-9.]*%')
+              
+              # Default values if not found
+              line_coverage=${line_coverage:-"N/A"}
+              branch_coverage=${branch_coverage:-"N/A"}
+              
+              echo "| $package_name | $class_name | $line_coverage | $branch_coverage |" >> $GITHUB_STEP_SUMMARY
             done
           else
             echo "JaCoCo coverage report generated. Check artifacts for details." >> $GITHUB_STEP_SUMMARY

@@ -70,5 +70,5 @@ jobs:
     - name: Build and push Docker image
       run: |
         docker images
-        docker build -t 430118834478.dkr.ecr.eu-north-1.amazonaws.com/charan-apps:${{ github.run_number }} .
-        docker push 430118834478.dkr.ecr.eu-north-1.amazonaws.com/charan-apps:${{ github.run_number }}
+        docker build -t 430118834478.dkr.ecr.eu-north-1.amazonaws.com/charan-app:${{ github.run_number }} .
+        docker push 430118834478.dkr.ecr.eu-north-1.amazonaws.com/charan-app:${{ github.run_number }}
